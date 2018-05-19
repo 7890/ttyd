@@ -391,7 +391,7 @@ main(int argc, char **argv) {
     if (ssl) {
         info.ssl_cert_filepath = cert_path;
         info.ssl_private_key_filepath = key_path;
-        info.ssl_ca_filepath = ca_path;
+//      info.ssl_ca_filepath = ca_path;
         info.ssl_cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:"
                 "ECDHE-RSA-AES256-GCM-SHA384:"
                 "DHE-RSA-AES256-GCM-SHA384:"
@@ -405,8 +405,12 @@ main(int argc, char **argv) {
                 "!DHE-RSA-AES256-SHA256:"
                 "!AES256-GCM-SHA384:"
                 "!AES256-SHA256";
-        if (strlen(info.ssl_ca_filepath) > 0)
-            info.options |= LWS_SERVER_OPTION_REQUIRE_VALID_OPENSSL_CLIENT_CERT;
+
+                if(strlen(ca_path)>0)
+                {
+                        info.ssl_ca_filepath = ca_path;
+                        info.options |= LWS_SERVER_OPTION_REQUIRE_VALID_OPENSSL_CLIENT_CERT;
+                }
 #if LWS_LIBRARY_VERSION_MAJOR >= 2
         info.options |= LWS_SERVER_OPTION_REDIRECT_HTTP_TO_HTTPS;
 #endif
