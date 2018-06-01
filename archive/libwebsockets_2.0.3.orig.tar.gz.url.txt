@@ -1,0 +1,2 @@
+/ubuntu/pool/universe/libw/libwebsockets/libwebsockets_2.0.3.orig.tar.gz
+sha256 cf0e91b564c879ab98844385c98e7c9e298cbb969dbc251a3f18a47feb94342c
