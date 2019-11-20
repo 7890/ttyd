@@ -1,4 +1,4 @@
-# ttyd - Share your terminal over the web [![Build Status](https://travis-ci.org/tsl0922/ttyd.svg?branch=master)](https://travis-ci.org/tsl0922/ttyd)
+# ttyd - Share your terminal over the web [![](https://github.com/tsl0922/ttyd/workflows/frontend/badge.svg)](https://github.com/tsl0922/ttyd/actions?workflow=frontend) [![](https://github.com/tsl0922/ttyd/workflows/backend/badge.svg)](https://github.com/tsl0922/ttyd/actions?workflow=backend)
 
 ttyd is a simple command-line tool for sharing terminal over the web, inspired by [GoTTY][1].
 
@@ -7,7 +7,8 @@ ttyd is a simple command-line tool for sharing terminal over the web, inspired b
 # Features
 
 - Built on top of [Libwebsockets][2] with C for speed
-- Fully-featured terminal based on [Xterm.js][3] with CJK (*Chinese, Japanese, Korean*) and IME support
+- Fully-featured terminal based on [Xterm.js][3] with [CJK][18] and IME support
+- Graphical [ZMODEM][16] integration with [lrzsz][17] support
 - SSL support based on [OpenSSL][4]
 - Run any custom command with options
 - Basic authentication support and many other custom options
@@ -25,15 +26,7 @@ brew install ttyd
 
 ## Install on Linux
 
-- Install from ppa (ubuntu 16.04 and later):
-
-    ```bash
-    sudo apt-get install -y software-properties-common
-    sudo add-apt-repository ppa:tsl0922/ttyd-dev
-    sudo apt-get update
-    sudo apt-get install ttyd
-    ```
-
+- Binary version: download from the [releases](https://github.com/tsl0922/ttyd/releases) page.
 - Build from source (debian/ubuntu):
 
     ```bash
@@ -44,7 +37,11 @@ brew install ttyd
     make && make install
     ```
 
-    You may need to compile/install [libwebsockets][2] from source if the `libwebsockets-dev` package is outdated.
+    You may also need to compile/install [libwebsockets][2] from source if the `libwebsockets-dev` package is outdated.
+    
+- Install on Gentoo:
+clone the repo at [https://bitbucket.org/mgpagano/ttyd/src/master/](https://bitbucket.org/mgpagano/ttyd/src/master/) and follow the directions [here](https://wiki.gentoo.org/wiki/Custom_repository#Creating_a_local_repository) for creating a local repository.
+
 
 ## Install on Windows
 
@@ -61,7 +58,7 @@ ttyd can be built with [MSYS2][10] on windows, The build instructions is [here][
 opkg install ttyd
 ```
 
-If the install command fails, you can [compile it yourself][14].
+You may want to [compile it manually][14].
 
 # Usage
 
@@ -74,31 +71,32 @@ USAGE:
     ttyd [options] <command> [<arguments...>]
 
 VERSION:
-    1.3.3
+    1.5.2
 
 OPTIONS:
-    --port, -p              Port to listen (default: 7681, use `0` for random port)
-    --interface, -i         Network interface to bind (eg: eth0), or UNIX domain socket path (eg: /var/run/ttyd.sock)
-    --credential, -c        Credential for Basic Authentication (format: username:password)
-    --uid, -u               User id to run with
-    --gid, -g               Group id to run with
-    --signal, -s            Signal to send to the command when exit it (default: SIGHUP)
-    --signal-list           Print a list of supported signals
-    --reconnect, -r         Time to reconnect for the client in seconds (default: 10)
-    --readonly, -R          Do not allow clients to write to the TTY
-    --client-option, -t     Send option to client (format: key=value), repeat to add more options
-    --check-origin, -O      Do not allow websocket connection from different origin
-    --max-clients, -m       Maximum clients to support (default: 0, no limit)
-    --once, -o              Accept only one client and exit on disconnection
-    --browser, -B           Open terminal with the default system browser
-    --index, -I             Custom index.html path
-    --ssl, -S               Enable SSL
-    --ssl-cert, -C          SSL certificate file path
-    --ssl-key, -K           SSL key file path
-    --ssl-ca, -A            SSL CA file path for client certificate verification
-    --debug, -d             Set log level (default: 7)
-    --version, -v           Print the version and exit
-    --help, -h              Print this text and exit
+    -p, --port              Port to listen (default: 7681, use `0` for random port)
+    -i, --interface         Network interface to bind (eg: eth0), or UNIX domain socket path (eg: /var/run/ttyd.sock)
+    -c, --credential        Credential for Basic Authentication (format: username:password)
+    -u, --uid               User id to run with
+    -g, --gid               Group id to run with
+    -s, --signal            Signal to send to the command when exit it (default: 1, SIGHUP)
+    -a, --url-arg           Allow client to send command line arguments in URL (eg: http://localhost:7681?arg=foo&arg=bar)
+    -R, --readonly          Do not allow clients to write to the TTY
+    -t, --client-option     Send option to client (format: key=value), repeat to add more options
+    -T, --terminal-type     Terminal type to report, default: xterm-256color
+    -O, --check-origin      Do not allow websocket connection from different origin
+    -m, --max-clients       Maximum clients to support (default: 0, no limit)
+    -o, --once              Accept only one client and exit on disconnection
+    -B, --browser           Open terminal with the default system browser
+    -I, --index             Custom index.html path
+    -6, --ipv6              Enable IPv6 support
+    -S, --ssl               Enable SSL
+    -C, --ssl-cert          SSL certificate file path
+    -K, --ssl-key           SSL key file path
+    -A, --ssl-ca            SSL CA file path for client certificate verification
+    -d, --debug             Set log level (default: 7)
+    -v, --version           Print the version and exit
+    -h, --help              Print this text and exit
 
 Visit https://github.com/tsl0922/ttyd to get more information and report bugs.
 ```
@@ -118,6 +116,10 @@ Then open <http://localhost:8080> with a browser, you will get a bash shell with
 - You can even run a none shell command like vim, try: `ttyd vim`, the web browser will show you a vim editor.
 - Sharing single process with multiple clients: `ttyd tmux new -A -s ttyd vim`, run `tmux new -A -s ttyd` to connect to the tmux session from terminal.
 
+## Browser Support
+
+Modern browsers, See [Browser Support][15].
+
 ## SSL how-to
 
 Generate SSL CA and self signed server/client certificates:
@@ -129,7 +131,7 @@ openssl req -new -x509 -days 365 -key ca.key -subj "/C=CN/ST=GD/L=SZ/O=Acme, Inc
 
 # server certificate (for multiple domains, change subjectAltName to: DNS:example.com,DNS:www.example.com)
 openssl req -newkey rsa:2048 -nodes -keyout server.key -subj "/C=CN/ST=GD/L=SZ/O=Acme, Inc./CN=localhost" -out server.csr
-openssl x509 -req -extfile <(printf "subjectAltName=DNS:localhost") -days 365 -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt
+openssl x509 -sha256 -req -extfile <(printf "subjectAltName=DNS:localhost") -days 365 -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt
 
 # client certificate (the p12/pem format may be useful for some clients)
 openssl req -newkey rsa:2048 -nodes -keyout client.key -subj "/C=CN/ST=GD/L=SZ/O=Acme, Inc./CN=client" -out client.csr
@@ -166,7 +168,7 @@ Docker containers are jailed environments which are more secure, this is useful 
 
   [1]: https://github.com/yudai/gotty
   [2]: https://libwebsockets.org
-  [3]: https://github.com/sourcelair/xterm.js
+  [3]: https://github.com/xtermjs/xterm.js
   [4]: https://www.openssl.org
   [5]: https://openwrt.org
   [6]: https://www.lede-project.org
@@ -178,3 +180,8 @@ Docker containers are jailed environments which are more secure, this is useful 
   [12]: https://github.com/rprichard/winpty
   [13]: https://github.com/tsl0922/ttyd/tree/master/msys2
   [14]: https://github.com/tsl0922/ttyd/tree/master/openwrt
+  [15]: https://github.com/xtermjs/xterm.js#browser-support
+  [16]: https://en.wikipedia.org/wiki/ZMODEM
+  [17]: https://ohse.de/uwe/software/lrzsz.html
+  [18]: https://en.wikipedia.org/wiki/CJK_characters
+  [19]: https://cmake.org/

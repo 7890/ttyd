@@ -12,6 +12,7 @@ ttyd 1 "September 2016" ttyd "User Manual"
 
   - Built on top of Libwebsockets with C for speed
   - Fully-featured terminal based on Xterm.js with CJK (Chinese, Japanese, Korean) and IME support
+  - Graphical ZMODEM integration with lrzsz support 
   - SSL support based on OpenSSL
   - Run any custom command with options
   - Basic authentication support and many other custom options
@@ -34,19 +35,19 @@ ttyd 1 "September 2016" ttyd "User Manual"
       Group id to run with
 
   -s, --signal <signal string>
-      Signal to send to the command when exit it (default: SIGHUP)
+      Signal to send to the command when exit it (default: 1, SIGHUP)
 
-  --signal-list
-      Print a list of supported signals
-
-  -r, --reconnect <seconds>
-      Time to reconnect for the client in seconds (default: 10)
+  -a, --url-arg
+      Allow client to send command line arguments in URL (eg: http://localhost:7681?arg=foo&arg=bar)
 
   -R, --readonly
       Do not allow clients to write to the TTY
 
   -t, --client-option <key=value>
       Send option to client (format: key=value), repeat to add more options
+
+  -T, --terminal-type
+      Terminal type to report, default: xterm-256color
 
   -O, --check-origin
       Do not allow websocket connection from different origin
@@ -62,6 +63,9 @@ ttyd 1 "September 2016" ttyd "User Manual"
 
   -I, --index <index file>
       Custom index.html path
+
+  -6, --ipv6
+      Enable IPv6 support
 
   -S, --ssl
       Enable SSL

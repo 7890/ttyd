@@ -1,8 +1,8 @@
 {
+  "private": true,
   "name": "ttyd",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "Share your terminal over the web",
-  "main": "js/app.js",
   "repository": {
     "url": "git@github.com:tsl0922/ttyd.git",
     "type": "git"
@@ -10,11 +10,60 @@
   "author": "Shuanglei Tao <tsl0922@gmail.com>",
   "license": "MIT",
   "scripts": {
-    "build": "gulp"
+    "prestart": "gulp clean",
+    "start": "webpack-dev-server",
+    "build": "NODE_ENV=production webpack && gulp",
+    "check": "gts check",
+    "fix": "gts fix"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "src/**/*.ts": [
+      "gts fix",
+      "git add"
+    ],
+    "src/**/*.scss": [
+      "scssfmt",
+      "git add"
+    ]
+  },
+  "devDependencies": {
+    "copy-webpack-plugin": "^5.0.3",
+    "css-loader": "^3.0.0",
+    "gts": "^1.0.0",
+    "gulp": "^4.0.2",
+    "gulp-clean": "^0.4.0",
+    "gulp-inline-source": "^4.0.0",
+    "html-webpack-plugin": "^3.2.0",
+    "husky": "^3.0.0",
+    "lint-staged": "^9.2.0",
+    "mini-css-extract-plugin": "^0.8.0",
+    "node-sass": "^4.12.0",
+    "optimize-css-assets-webpack-plugin": "^5.0.1",
+    "sass-loader": "^8.0.0",
+    "scssfmt": "^1.0.7",
+    "style-loader": "^1.0.0",
+    "terser-webpack-plugin": "^2.0.0",
+    "ts-loader": "^6.0.1",
+    "tslint": "^5.16.0",
+    "tslint-loader": "^3.5.4",
+    "typescript": "^3.4.5",
+    "webpack": "^4.32.2",
+    "webpack-cli": "^3.3.2",
+    "webpack-dev-server": "^3.4.1",
+    "webpack-merge": "^4.2.1"
   },
   "dependencies": {
-    "gulp": "^3.9.1",
-    "gulp-inline-source": "^3.0.0",
-    "xterm": "^2.9.2"
+    "backoff": "^2.5.0",
+    "decko": "^1.2.0",
+    "preact": "^10.0.1",
+    "xterm": "^4.2.0",
+    "xterm-addon-fit": "^0.3.0",
+    "xterm-addon-web-links": "^0.2.1",
+    "zmodem.js": "^0.1.9"
   }
 }

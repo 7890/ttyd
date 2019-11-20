@@ -1,8 +1,24 @@
 cmake_minimum_required(VERSION 2.8)
-cmake_policy(SET CMP0048 NEW)
 
-project(ttyd VERSION "1.3.3")
+project(ttyd)
+set(PROJECT_VERSION "1.5.2")
 
+find_package(Git)
+if(GIT_FOUND)
+    execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE GIT_RET
+            OUTPUT_VARIABLE GIT_COMMIT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+    )
+    if("${GIT_RET}" STREQUAL "0")
+        set(PROJECT_VERSION "${PROJECT_VERSION}-${GIT_COMMIT}")
+    endif()
+endif()
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_GNU_SOURCE")
 if(CMAKE_VERSION VERSION_LESS "3.1")
     if ("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99")
@@ -34,9 +50,6 @@ else() # try to find libwebsockets with pkg-config
     mark_as_advanced(LIBWEBSOCKETS_INCLUDE_DIR LIBWEBSOCKETS_LIBRARIES)
 endif()
 
-include(CheckIncludeFile)
-check_include_file(lws_config.h HAVE_LWS_CONFIG_H)
-
 pkg_check_modules(PC_JSON-C REQUIRED json-c)
 find_path(JSON-C_INCLUDE_DIR json.h
         HINTS ${PC_JSON-C_INCLUDEDIR} ${PC_JSON-C_INCLUDE_DIRS} PATH_SUFFIXES json-c json)
@@ -54,7 +67,16 @@ add_custom_command(OUTPUT html.h
 list(APPEND SOURCE_FILES html.h)
 
 set(INCLUDE_DIRS ${OPENSSL_INCLUDE_DIR} ${LIBWEBSOCKETS_INCLUDE_DIR} ${JSON-C_INCLUDE_DIR})
-set(LINK_LIBS util pthread ${OPENSSL_LIBRARIES} ${LIBWEBSOCKETS_LIBRARIES} ${JSON-C_LIBRARY})
+set(LINK_LIBS ${OPENSSL_LIBRARIES} ${LIBWEBSOCKETS_LIBRARIES} ${JSON-C_LIBRARY})
+
+if(APPLE)
+    # required for the new homebrew version of libwebsockets
+    find_path(LIBUV_INCLUDE_DIR NAMES uv.h)
+    find_path(LIBEVENT_INCLUDE_DIR NAMES event2/event.h)
+    list(APPEND INCLUDE_DIRS ${LIBUV_INCLUDE_DIR} ${LIBEVENT_INCLUDE_DIR})
+else()
+    list(APPEND LINK_LIBS util)
+endif()
 
 if(WIN32)
     list(APPEND LINK_LIBS shell32)
@@ -69,17 +91,3 @@ include(GNUInstallDirs)
 
 install(TARGETS ${PROJECT_NAME} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT prog)
 install(FILES man/ttyd.1 DESTINATION "${CMAKE_INSTALL_MANDIR}/man1" COMPONENT doc)
-
-set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_NAME} - Share your terminal over the web")
-set(CPACK_PACKAGE_CONTACT "Shuanglei Tao <tsl0922@gmail.com>")
-set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}_${CMAKE_SYSTEM_PROCESSOR}")
-
-set(CPACK_GENERATOR "DEB")
-SET(CPACK_DEBIAN_ARCHITECTURE ${CMAKE_SYSTEM_PROCESSOR})
-set(CPACK_DEBIAN_PACKAGE_SECTION "shells")
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://tsl0922.github.io/ttyd")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libjson-c2, libwebsockets7, libssl1.0.0, libc6 (>= 2.14)")
-
-include(CPack)

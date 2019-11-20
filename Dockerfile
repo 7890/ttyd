@@ -18,7 +18,7 @@ RUN apt-get update \
       vim-common \
     && git clone --depth=1 https://github.com/tsl0922/ttyd.git /tmp/ttyd \
     && cd /tmp/ttyd && mkdir build && cd build \
-    && cmake .. \
+    && cmake -DCMAKE_BUILD_TYPE=RELEASE .. \
     && make \
     && make install \
     && apt-get remove -y --purge \
@@ -33,8 +33,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/ttyd
 
+ENV TINI_VERSION v0.18.0
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
+RUN chmod +x /tini
+
 EXPOSE 7681
 
-ENTRYPOINT ["ttyd"]
-
-CMD ["bash"]
+ENTRYPOINT ["/tini", "--"]
+CMD ["ttyd", "bash"]

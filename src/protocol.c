@@ -1,32 +1,54 @@
-#include "server.h"
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <sys/queue.h>
 
-#define BUF_SIZE 1024
+#if defined(__OpenBSD__) || defined(__APPLE__)
+#include <util.h>
+#elif defined(__FreeBSD__)
+#include <libutil.h>
+#else
+#include <pty.h>
+#endif
+
+#include <libwebsockets.h>
+#include <json.h>
+
+#include "server.h"
+#include "utils.h"
+
+// initial message list
+char initial_cmds[] = {
+        SET_WINDOW_TITLE,
+        SET_PREFERENCES
+};
 
 int
-send_initial_message(struct lws *wsi) {
-    unsigned char message[LWS_PRE + 256];
+send_initial_message(struct lws *wsi, int index) {
+    unsigned char message[LWS_PRE + 1 + 4096];
     unsigned char *p = &message[LWS_PRE];
-    int n;
+    char buffer[128];
+    int n = 0;
 
-    char hostname[128];
-    gethostname(hostname, sizeof(hostname) - 1);
+    char cmd = initial_cmds[index];
+    switch(cmd) {
+        case SET_WINDOW_TITLE:
+            gethostname(buffer, sizeof(buffer) - 1);
+            n = sprintf((char *) p, "%c%s (%s)", cmd, server->command, buffer);
+            break;
+        case SET_PREFERENCES:
+            n = sprintf((char *) p, "%c%s", cmd, server->prefs_json);
+            break;
+        default:
+            break;
+    }
 
-    // window title
-    n = sprintf((char *) p, "%c%s (%s)", SET_WINDOW_TITLE, server->command, hostname);
-    if (lws_write(wsi, p, (size_t) n, LWS_WRITE_TEXT) < n) {
-        return -1;
-    }
-    // reconnect time
-    n = sprintf((char *) p, "%c%d", SET_RECONNECT, server->reconnect);
-    if (lws_write(wsi, p, (size_t) n, LWS_WRITE_TEXT) < n) {
-        return -1;
-    }
-    // client preferences
-    n = sprintf((char *) p, "%c%s", SET_PREFERENCES, server->prefs_json);
-    if (lws_write(wsi, p, (size_t) n, LWS_WRITE_TEXT) < n) {
-        return -1;
-    }
-    return 0;
+    return lws_write(wsi, p, (size_t) n, LWS_WRITE_BINARY);
 }
 
 bool
@@ -60,26 +82,32 @@ check_host_origin(struct lws *wsi) {
     char buf[origin_length + 1];
     memset(buf, 0, sizeof(buf));
     int len = lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_ORIGIN);
-    if (len > 0) {
-        const char *prot, *address, *path;
-        int port;
-        if (lws_parse_uri(buf, &prot, &address, &port, &path))
-            return false;
-        sprintf(buf, "%s:%d", address, port);
-        int host_length = lws_hdr_total_length(wsi, WSI_TOKEN_HOST);
-        if (host_length != strlen(buf))
-            return false;
-        char host_buf[host_length + 1];
-        memset(host_buf, 0, sizeof(host_buf));
-        len = lws_hdr_copy(wsi, host_buf, sizeof(host_buf), WSI_TOKEN_HOST);
-        return len > 0 && strcasecmp(buf, host_buf) == 0;
+    if (len <= 0) {
+        return false;
     }
-    return false;
+
+    const char *prot, *address, *path;
+    int port;
+    if (lws_parse_uri(buf, &prot, &address, &port, &path))
+        return false;
+    if (port == 80 || port == 443) {
+        sprintf(buf, "%s", address);
+    } else {
+        sprintf(buf, "%s:%d", address, port);
+    }
+
+    int host_length = lws_hdr_total_length(wsi, WSI_TOKEN_HOST);
+    if (host_length != strlen(buf))
+        return false;
+    char host_buf[host_length + 1];
+    memset(host_buf, 0, sizeof(host_buf));
+    len = lws_hdr_copy(wsi, host_buf, sizeof(host_buf), WSI_TOKEN_HOST);
+
+    return len > 0 && strcasecmp(buf, host_buf) == 0;
 }
 
 void
 tty_client_remove(struct tty_client *client) {
-    pthread_mutex_lock(&server->lock);
     struct tty_client *iterator;
     LIST_FOREACH(iterator, &server->clients, list) {
         if (iterator == client) {
@@ -88,92 +116,114 @@ tty_client_remove(struct tty_client *client) {
             break;
         }
     }
-    pthread_mutex_unlock(&server->lock);
 }
 
 void
 tty_client_destroy(struct tty_client *client) {
     if (!client->running || client->pid <= 0)
-        return;
+        goto cleanup;
+
     client->running = false;
 
-    // kill process and free resource
-    lwsl_notice("sending %s (%d) to process %d\n", server->sig_name, server->sig_code, client->pid);
-    if (kill(client->pid, server->sig_code) != 0) {
-        lwsl_err("kill: %d, errno: %d (%s)\n", client->pid, errno, strerror(errno));
+    // kill process (group) and free resource
+    int pgid = getpgid(client->pid);
+    int pid = pgid > 0 ? -pgid : client->pid;
+    lwsl_notice("sending %s (%d) to process (group) %d\n", server->sig_name, server->sig_code, pid);
+    if (kill(pid, server->sig_code) != 0) {
+        lwsl_err("kill: %d, errno: %d (%s)\n", pid, errno, strerror(errno));
     }
-    int status;
-    while (waitpid(client->pid, &status, 0) == -1 && errno == EINTR)
-        ;
-    lwsl_notice("process exited with code %d, pid: %d\n", status, client->pid);
+    pid_t pid_out;
+    client->exit_status = wait_proc(client->pid, &pid_out);
+    if (pid_out > 0) {
+        lwsl_notice("process exited with code %d, pid: %d\n", client->exit_status, pid_out);
+    }
     close(client->pty);
 
+cleanup:
     // free the buffer
     if (client->buffer != NULL)
         free(client->buffer);
+
+    for (int i = 0; i < client->argc; i++) {
+        free(client->args[i]);
+    }
+
+#if LWS_LIBRARY_VERSION_NUMBER >= 3002000
+    lws_sul_schedule(context, 0, &client->sul_stagger, NULL, LWS_SET_TIMER_USEC_CANCEL);
+#endif
 
     // remove from client list
     tty_client_remove(client);
 }
 
-void *
-thread_run_command(void *args) {
-    struct tty_client *client;
+int
+spawn_process(struct tty_client *client) {
+    // append url args to arguments
+    char *argv[server->argc + client->argc + 1];
+    int i, n = 0;
+    for (i = 0; i < server->argc; i++) {
+        argv[n++] = server->argv[i];
+    }
+    for (i = 0; i < client->argc; i++) {
+        argv[n++] = client->args[i];
+    }
+    argv[n] = NULL;
+
     int pty;
-    int bytes;
-    char buf[BUF_SIZE];
-    fd_set des_set;
-
-    client = (struct tty_client *) args;
     pid_t pid = forkpty(&pty, NULL, NULL, NULL);
-
-    switch (pid) {
-        case -1: /* error */
-            lwsl_err("forkpty, error: %d (%s)\n", errno, strerror(errno));
-            break;
-        case 0: /* child */
-            if (setenv("TERM", "xterm-256color", true) < 0) {
-                perror("setenv");
-                exit(1);
-            }
-            if (execvp(server->argv[0], server->argv) < 0) {
-                perror("execvp");
-                exit(1);
-            }
-            break;
-        default: /* parent */
-            lwsl_notice("started process, pid: %d\n", pid);
-            client->pid = pid;
-            client->pty = pty;
-            client->running = true;
-            if (client->size.ws_row > 0 && client->size.ws_col > 0)
-                ioctl(client->pty, TIOCSWINSZ, &client->size);
-
-            while (client->running) {
-                FD_ZERO (&des_set);
-                FD_SET (pty, &des_set);
-
-                if (select(pty + 1, &des_set, NULL, NULL, NULL) < 0)
-                    break;
-
-                if (FD_ISSET (pty, &des_set)) {
-                    memset(buf, 0, BUF_SIZE);
-                    bytes = (int) read(pty, buf, BUF_SIZE);
-                    struct pty_data *frame = (struct pty_data *) xmalloc(sizeof(struct pty_data));
-                    frame->len = bytes;
-                    if (bytes > 0) {
-                        frame->data = xmalloc((size_t) bytes);
-                        memcpy(frame->data, buf, bytes);
-                    }
-                    pthread_mutex_lock(&client->lock);
-                    STAILQ_INSERT_TAIL(&client->queue, frame, list);
-                    pthread_mutex_unlock(&client->lock);
-                }
-            }
-            break;
+    if (pid < 0) { /* error */
+        lwsl_err("forkpty failed: %d (%s)\n", errno, strerror(errno));
+        return 1;
+    } else if (pid == 0) { /* child */
+        setenv("TERM", server->terminal_type, true);
+#if LWS_LIBRARY_VERSION_NUMBER < 3001000
+        // libwebsockets set FD_CLOEXEC since v3.1.0
+        close(lws_get_socket_fd(client->wsi));
+#endif
+        if (execvp(argv[0], argv) < 0) {
+            perror("execvp failed\n");
+            _exit(-errno);
+        }
     }
 
+    // set the file descriptor close-on-exec
+    int status_flags = fcntl(pty, F_GETFL);
+    if (status_flags != -1) {
+        fcntl(pty, F_SETFD, status_flags | FD_CLOEXEC);
+    }
+
+    lwsl_notice("started process, pid: %d\n", pid);
+    client->pid = pid;
+    client->pty = pty;
+    client->running = true;
+    if (client->size.ws_row > 0 && client->size.ws_col > 0)
+        ioctl(client->pty, TIOCSWINSZ, &client->size);
+
     return 0;
+}
+
+void
+tty_client_poll(struct tty_client *client) {
+    if (client->pid <= 0 || client->state == STATE_READY) return;
+
+    if (!client->running) {
+        memset(client->pty_buffer, 0, sizeof(client->pty_buffer));
+        client->pty_len = client->exit_status;
+        client->state = STATE_READY;
+        return;
+    }
+
+    fd_set des_set;
+    FD_ZERO (&des_set);
+    FD_SET (client->pty, &des_set);
+    struct timeval tv = { 0, 0 };
+    if (select(client->pty + 1, &des_set, NULL, NULL, &tv) <= 0) return;
+
+    if (FD_ISSET (client->pty, &des_set)) {
+        memset(client->pty_buffer, 0, sizeof(client->pty_buffer));
+        client->pty_len = read(client->pty, client->pty_buffer + LWS_PRE + 1, BUF_SIZE);
+        client->state = STATE_READY;
+    }
 }
 
 int
@@ -181,6 +231,7 @@ callback_tty(struct lws *wsi, enum lws_callback_reasons reason,
              void *user, void *in, size_t len) {
     struct tty_client *client = (struct tty_client *) user;
     char buf[256];
+    size_t n = 0;
 
     switch (reason) {
         case LWS_CALLBACK_FILTER_PROTOCOL_CONNECTION:
@@ -192,7 +243,7 @@ callback_tty(struct lws *wsi, enum lws_callback_reasons reason,
                 lwsl_warn("refuse to serve WS client due to the --max-clients option.\n");
                 return 1;
             }
-            if (lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_GET_URI) <= 0 || strcmp(buf, WS_PATH)) {
+            if (lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_GET_URI) <= 0 || strcmp(buf, WS_PATH) != 0) {
                 lwsl_warn("refuse to serve WS client for illegal ws path: %s\n", buf);
                 return 1;
             }
@@ -206,84 +257,85 @@ callback_tty(struct lws *wsi, enum lws_callback_reasons reason,
         case LWS_CALLBACK_ESTABLISHED:
             client->running = false;
             client->initialized = false;
+            client->initial_cmd_index = 0;
             client->authenticated = false;
             client->wsi = wsi;
             client->buffer = NULL;
-            lws_get_peer_addresses(wsi, lws_get_socket_fd(wsi),
-                                   client->hostname, sizeof(client->hostname),
-                                   client->address, sizeof(client->address));
-            STAILQ_INIT(&client->queue);
+            client->state = STATE_INIT;
+            client->pty_len = 0;
+            client->argc = 0;
 
-            pthread_mutex_lock(&server->lock);
+            if (server->url_arg) {
+                while (lws_hdr_copy_fragment(wsi, buf, sizeof(buf), WSI_TOKEN_HTTP_URI_ARGS, n++) > 0) {
+                    if (strncmp(buf, "arg=", 4) == 0) {
+                        client->args = xrealloc(client->args, (client->argc + 1) * sizeof(char *));
+                        client->args[client->argc] = strdup(&buf[4]);
+                        client->argc++;
+                    }
+                }
+            }
+
             LIST_INSERT_HEAD(&server->clients, client, list);
             server->client_count++;
-            pthread_mutex_unlock(&server->lock);
+
             lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_GET_URI);
 
-            lwsl_notice("WS   %s - %s (%s), clients: %d\n", buf, client->address, client->hostname, server->client_count);
+#if LWS_LIBRARY_VERSION_NUMBER >= 2004000
+            lws_get_peer_simple(lws_get_network_wsi(wsi), client->address, sizeof(client->address));
+#else
+            char name[100];
+            lws_get_peer_addresses(wsi, lws_get_socket_fd(wsi), name, sizeof(name), client->address, sizeof(client->address));
+#endif
+            lwsl_notice("WS   %s - %s, clients: %d\n", buf, client->address, server->client_count);
             break;
 
         case LWS_CALLBACK_SERVER_WRITEABLE:
             if (!client->initialized) {
-                if (send_initial_message(wsi) < 0) {
-                    tty_client_remove(client);
+                if (client->initial_cmd_index == sizeof(initial_cmds)) {
+                    client->initialized = true;
+                    break;
+                }
+                if (send_initial_message(wsi, client->initial_cmd_index) < 0) {
+                    lwsl_err("failed to send initial message, index: %d\n", client->initial_cmd_index);
                     lws_close_reason(wsi, LWS_CLOSE_STATUS_UNEXPECTED_CONDITION, NULL, 0);
                     return -1;
                 }
-                client->initialized = true;
+                client->initial_cmd_index++;
+                lws_callback_on_writable(wsi);
+                break;
+            }
+            if (client->state != STATE_READY) {
                 break;
             }
 
-            pthread_mutex_lock(&client->lock);
-            while (!STAILQ_EMPTY(&client->queue)) {
-                struct pty_data *frame = STAILQ_FIRST(&client->queue);
-                // read error or client exited, close connection
-                if (frame->len <= 0) {
-                    STAILQ_REMOVE_HEAD(&client->queue, list);
-                    free(frame);
-                    tty_client_remove(client);
-                    lws_close_reason(wsi,
-                                     frame->len == 0 ? LWS_CLOSE_STATUS_NORMAL : LWS_CLOSE_STATUS_UNEXPECTED_CONDITION,
-                                     NULL, 0);
-                    return -1;
-                }
-
-                char *b64_text = base64_encode((const unsigned char *) frame->data, (size_t) frame->len);
-                size_t msg_len = LWS_PRE + strlen(b64_text) + 1;
-                unsigned char message[msg_len];
-                unsigned char *p = &message[LWS_PRE];
-                size_t n = sprintf((char *) p, "%c%s", OUTPUT, b64_text);
-
-                free(b64_text);
-
-                if (lws_write(wsi, p, n, LWS_WRITE_TEXT) < n) {
-                    lwsl_err("write data to WS\n");
-                    break;
-                }
-
-                STAILQ_REMOVE_HEAD(&client->queue, list);
-                free(frame->data);
-                free(frame);
-
-                if (lws_partial_buffered(wsi)) {
-                    lws_callback_on_writable(wsi);
-                    break;
-                }
+            // read error or client exited, close connection
+            if (client->pty_len == 0) {
+                lws_close_reason(wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
+                return 1;
+            } else if (client->pty_len < 0) {
+                lwsl_err("read error: %d (%s)\n", errno, strerror(errno));
+                lws_close_reason(wsi, LWS_CLOSE_STATUS_UNEXPECTED_CONDITION, NULL, 0);
+                return -1;
             }
-            pthread_mutex_unlock(&client->lock);
+
+            client->pty_buffer[LWS_PRE] = OUTPUT;
+            n = (size_t) (client->pty_len + 1);
+            if (lws_write(wsi, (unsigned char *) client->pty_buffer + LWS_PRE, n, LWS_WRITE_BINARY) < n) {
+                lwsl_err("write data to WS\n");
+            }
+            client->state = STATE_DONE;
             break;
 
         case LWS_CALLBACK_RECEIVE:
             if (client->buffer == NULL) {
-                client->buffer = xmalloc(len + 1);
+                client->buffer = xmalloc(len);
                 client->len = len;
                 memcpy(client->buffer, in, len);
             } else {
-                client->buffer = xrealloc(client->buffer, client->len + len + 1);
+                client->buffer = xrealloc(client->buffer, client->len + len);
                 memcpy(client->buffer + client->len, in, len);
                 client->len += len;
             }
-            client->buffer[client->len] = '\0';
 
             const char command = client->buffer[0];
 
@@ -304,22 +356,10 @@ callback_tty(struct lws *wsi, enum lws_callback_reasons reason,
                         break;
                     if (server->readonly)
                         return 0;
-                    if (write(client->pty, client->buffer + 1, client->len - 1) < client->len - 1) {
-                        lwsl_err("write INPUT to pty\n");
-                        tty_client_remove(client);
+                    if (write(client->pty, client->buffer + 1, client->len - 1) == -1) {
+                        lwsl_err("write INPUT to pty: %d (%s)\n", errno, strerror(errno));
                         lws_close_reason(wsi, LWS_CLOSE_STATUS_UNEXPECTED_CONDITION, NULL, 0);
                         return -1;
-                    }
-                    break;
-                case PING:
-                    {
-                        unsigned char c = PONG;
-                        if (lws_write(wsi, &c, 1, LWS_WRITE_TEXT) != 1) {
-                            lwsl_err("send PONG\n");
-                            tty_client_remove(client);
-                            lws_close_reason(wsi, LWS_CLOSE_STATUS_UNEXPECTED_CONDITION, NULL, 0);
-                            return -1;
-                        }
                     }
                     break;
                 case RESIZE_TERMINAL:
@@ -343,21 +383,15 @@ callback_tty(struct lws *wsi, enum lws_callback_reasons reason,
                                 lwsl_warn("WS authentication failed with token: %s\n", token);
                         }
                         if (!client->authenticated) {
-                            tty_client_remove(client);
                             lws_close_reason(wsi, LWS_CLOSE_STATUS_POLICY_VIOLATION, NULL, 0);
                             return -1;
                         }
                     }
-                    int err = pthread_create(&client->thread, NULL, thread_run_command, client);
-                    if (err != 0) {
-                        lwsl_err("pthread_create return: %d\n", err);
-                        return 1;
-                    }
+                    if (spawn_process(client) != 0) return 1;
                     break;
                 default:
-                    lwsl_warn("unknown message type: %c\n", command);
-                    lws_close_reason(wsi, LWS_CLOSE_STATUS_INVALID_PAYLOAD, NULL, 0);
-                    return -1;
+                    lwsl_warn("ignored unknown message type: %c\n", command);
+                    break;
             }
 
             if (client->buffer != NULL) {
@@ -368,7 +402,7 @@ callback_tty(struct lws *wsi, enum lws_callback_reasons reason,
 
         case LWS_CALLBACK_CLOSED:
             tty_client_destroy(client);
-            lwsl_notice("WS closed from %s (%s), clients: %d\n", client->address, client->hostname, server->client_count);
+            lwsl_notice("WS closed from %s, clients: %d\n", client->address, server->client_count);
             if (server->once && server->client_count == 0) {
                 lwsl_notice("exiting due to the --once option.\n");
                 force_exit = true;

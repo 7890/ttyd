@@ -18,6 +18,8 @@ Built on top of Libwebsockets with C for speed
 .IP \(bu 2
 Fully\-featured terminal based on Xterm.js with CJK (Chinese, Japanese, Korean) and IME support
 .IP \(bu 2
+Graphical ZMODEM integration with lrzsz support
+.IP \(bu 2
 SSL support based on OpenSSL
 .IP \(bu 2
 Run any custom command with options
@@ -50,15 +52,12 @@ Cross platform: macOS, Linux, FreeBSD/OpenBSD, OpenWrt/LEDE, Windows
 
 .PP
 \-s, \-\-signal <signal string>
-      Signal to send to the command when exit it (default: SIGHUP)
+      Signal to send to the command when exit it (default: 1, SIGHUP)
 
 .PP
-\-\-signal\-list
-      Print a list of supported signals
-
-.PP
-\-r, \-\-reconnect <seconds>
-      Time to reconnect for the client in seconds (default: 10)
+\-a, \-\-url\-arg
+      Allow client to send command line arguments in URL (eg: 
+\[la]http://localhost:7681?arg=foo&arg=bar\[ra])
 
 .PP
 \-R, \-\-readonly
@@ -67,6 +66,10 @@ Cross platform: macOS, Linux, FreeBSD/OpenBSD, OpenWrt/LEDE, Windows
 .PP
 \-t, \-\-client\-option <key=value>
       Send option to client (format: key=value), repeat to add more options
+
+.PP
+\-T, \-\-terminal\-type
+      Terminal type to report, default: xterm\-256color
 
 .PP
 \-O, \-\-check\-origin
@@ -87,6 +90,10 @@ Cross platform: macOS, Linux, FreeBSD/OpenBSD, OpenWrt/LEDE, Windows
 .PP
 \-I, \-\-index <index file>
       Custom index.html path
+
+.PP
+\-6, \-\-ipv6
+      Enable IPv6 support
 
 .PP
 \-S, \-\-ssl

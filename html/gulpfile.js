@@ -1,10 +1,14 @@
-var gulp = require('gulp'),
-    inlinesource = require('gulp-inline-source');
+const { src, dest, task } = require("gulp");
+const clean = require('gulp-clean');
+const inlinesource = require('gulp-inline-source');
 
-gulp.task('inlinesource', function () {
-    return gulp.src('*.html')
-        .pipe(inlinesource())
-        .pipe(gulp.dest('../src'));
+task('clean', () => {
+    return src('dist', {read: false, allowEmpty: true})
+        .pipe(clean());
 });
 
-gulp.task('default', ['inlinesource']);
+task('default', () => {
+    return src('dist/index.html')
+        .pipe(inlinesource())
+        .pipe(dest('../src/'));
+});
